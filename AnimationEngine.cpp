@@ -14,6 +14,10 @@ AnimationState blink_anim;
 Point current_left_eye[EYE_VERTEX_COUNT];
 Point current_right_eye[EYE_VERTEX_COUNT];
 
+// Biến trạng thái cho hướng nhìn (Gaze)
+float gaze_offset_x = 0.0;
+float gaze_offset_y = 0.0;
+
 // --- CÁC HÀM TIỆN ÍCH ---
 
 // Nội suy tuyến tính
@@ -106,14 +110,35 @@ void animation_engine_start_blink() {
     blink_anim.intensity = 1.0;
 }
 
+// MỚI: Các hàm điều khiển hướng nhìn
+void animation_engine_look_left() {
+    gaze_offset_x = -10.0; // Dịch tâm nhìn sang trái 10 pixel
+    gaze_offset_y = 0.0;
+}
+
+void animation_engine_look_right() {
+    gaze_offset_x = 10.0; // Dịch tâm nhìn sang phải 10 pixel
+    gaze_offset_y = 0.0;
+}
+
+void animation_engine_look_center() {
+    gaze_offset_x = 0.0;
+    gaze_offset_y = 0.0;
+}
+
+
 void animation_engine_update() {
-    // Ưu tiên xử lý chớp mắt
+    // =========================================================================
+    // GIAI ĐOẠN 1: TÍNH TOÁN HÌNH DẠNG MẮT CƠ BẢN (SHAPE CALCULATION)
+    // =========================================================================
+
+    // Ưu tiên xử lý chớp mắt trước
     if (blink_anim.is_playing) {
         unsigned long elapsed = millis() - blink_anim.start_time;
         float raw_progress = (float)elapsed / (blink_anim.duration_sec * 1000.0f);
 
         // Logic chớp mắt: nửa đầu đi xuống (nhắm mắt), nửa sau đi lên (mở mắt)
-        if (raw_progress < 0.5) {
+        if (raw_progress < 0.5f) {
             // Đi từ trạng thái hiện tại -> BLINK
             float progress = raw_progress * 2.0f; // Chuyển progress từ 0->0.5 thành 0->1.0
             float eased_progress = apply_easing(progress, blink_anim.easing);
@@ -122,23 +147,22 @@ void animation_engine_update() {
             // Đi từ BLINK -> trạng thái hiện tại
             float progress = (raw_progress - 0.5f) * 2.0f; // Chuyển progress từ 0.5->1.0 thành 0->1.0
             float eased_progress = apply_easing(progress, blink_anim.easing);
+            
             // Đảo ngược start và end để mở mắt
-            const Emotion* temp_start = blink_anim.end_state;
-            const Emotion* temp_end = blink_anim.start_state;
-            // Tạo một anim tạm để tính toán
-            AnimationState temp_anim = blink_anim;
-            temp_anim.start_state = temp_start;
-            temp_anim.end_state = temp_end;
+            AnimationState temp_anim = blink_anim; // Tạo bản sao để không thay đổi anim gốc
+            temp_anim.start_state = blink_anim.end_state;   // Bắt đầu từ BLINK
+            temp_anim.end_state = blink_anim.start_state;     // Kết thúc ở trạng thái cũ
             calculate_current_frame(&temp_anim, eased_progress);
         }
 
-        if (raw_progress >= 1.0) {
+        // Kiểm tra kết thúc animation chớp mắt
+        if (raw_progress >= 1.0f) {
             blink_anim.is_playing = false;
             // Tiếp tục animation cảm xúc nếu nó đã bị tạm dừng
             if (emotion_anim.is_paused) {
                 emotion_anim.is_paused = false;
                 // Tính lại start_time để tiếp tục từ điểm đã dừng
-                unsigned long new_offset = emotion_anim.duration_sec * 1000.0f * emotion_anim.paused_progress;
+                unsigned long new_offset = (unsigned long)(emotion_anim.duration_sec * 1000.0f * emotion_anim.paused_progress);
                 emotion_anim.start_time = millis() - new_offset;
             }
         }
@@ -148,21 +172,67 @@ void animation_engine_update() {
         unsigned long elapsed = millis() - emotion_anim.start_time;
         float raw_progress = (float)elapsed / (emotion_anim.duration_sec * 1000.0f);
 
-        if (raw_progress >= 1.0) {
-            raw_progress = 1.0;
-            emotion_anim.is_playing = false;
+        if (raw_progress >= 1.0f) {
+            raw_progress = 1.0f;
+            emotion_anim.is_playing = false; // Đánh dấu animation kết thúc
         }
         
         float eased_progress = apply_easing(raw_progress, emotion_anim.easing);
         float final_progress = eased_progress * emotion_anim.intensity;
         calculate_current_frame(&emotion_anim, final_progress);
     }
+    // Nếu không có animation nào đang chạy, `current_..._eye` sẽ giữ nguyên giá trị từ lần tính toán cuối cùng.
 
-    // Luôn vẽ frame hiện tại lên màn hình
+    // =========================================================================
+    // GIAI ĐOẠN 2: ÁP DỤNG BIẾN ĐỔI (TRANSFORM) VÀ VẼ
+    // =========================================================================
+    
+    // Mảng RAM tạm thời để chứa tọa độ cuối cùng sau khi biến đổi
+    Point final_left_eye[EYE_VERTEX_COUNT];
+    Point final_right_eye[EYE_VERTEX_COUNT];
+
+    // Các tham số cho hiệu ứng phối cảnh
+    const float PERSPECTIVE_SCALE_AMOUNT = 0.15f; // Mắt xa sẽ nhỏ hơn 15%
+    const float MAX_GAZE_OFFSET = 10.0f; // Phải khớp với giá trị trong hàm look_left/right
+
+    // Tính toán hệ số co giãn cho mỗi mắt dựa trên hướng nhìn
+    float scale_left = 1.0f - (gaze_offset_x / MAX_GAZE_OFFSET) * PERSPECTIVE_SCALE_AMOUNT;
+    float scale_right = 1.0f + (gaze_offset_x / MAX_GAZE_OFFSET) * PERSPECTIVE_SCALE_AMOUNT;
+
+    // Tính toán tâm của mỗi mắt để co giãn cho đúng
+    long left_center_x = 0, left_center_y = 0;
+    long right_center_x = 0, right_center_y = 0;
+    for(int i=0; i<EYE_VERTEX_COUNT; ++i) {
+        left_center_x += current_left_eye[i].x;
+        left_center_y += current_left_eye[i].y;
+        right_center_x += current_right_eye[i].x;
+        right_center_y += current_right_eye[i].y;
+    }
+    left_center_x /= EYE_VERTEX_COUNT;
+    left_center_y /= EYE_VERTEX_COUNT;
+    right_center_x /= EYE_VERTEX_COUNT;
+    right_center_y /= EYE_VERTEX_COUNT;
+
+    // Áp dụng các phép biến đổi (dịch chuyển + co giãn) cho từng điểm
+    for (int i = 0; i < EYE_VERTEX_COUNT; i++) {
+        // Mắt trái
+        float temp_lx = current_left_eye[i].x - left_center_x;
+        float temp_ly = current_left_eye[i].y - left_center_y;
+        final_left_eye[i].x = (int16_t)(temp_lx * scale_left + left_center_x + gaze_offset_x);
+        final_left_eye[i].y = (int16_t)(temp_ly * scale_left + left_center_y + gaze_offset_y);
+
+        // Mắt phải
+        float temp_rx = current_right_eye[i].x - right_center_x;
+        float temp_ry = current_right_eye[i].y - right_center_y;
+        final_right_eye[i].x = (int16_t)(temp_rx * scale_right + right_center_x + gaze_offset_x);
+        final_right_eye[i].y = (int16_t)(temp_ry * scale_right + right_center_y + gaze_offset_y);
+    }
+
+    // Luôn vẽ frame hiện tại lên màn hình bằng dữ liệu đã biến đổi
     u8g2.clearBuffer();
     for (int i = 1; i < EYE_VERTEX_COUNT - 1; i++) {
-        u8g2.drawTriangle(current_left_eye[0].x, current_left_eye[0].y, current_left_eye[i].x, current_left_eye[i].y, current_left_eye[i+1].x, current_left_eye[i+1].y);
-        u8g2.drawTriangle(current_right_eye[0].x, current_right_eye[0].y, current_right_eye[i].x, current_right_eye[i].y, current_right_eye[i+1].x, current_right_eye[i+1].y);
+        u8g2.drawTriangle(final_left_eye[0].x, final_left_eye[0].y, final_left_eye[i].x, final_left_eye[i].y, final_left_eye[i+1].x, final_left_eye[i+1].y);
+        u8g2.drawTriangle(final_right_eye[0].x, final_right_eye[0].y, final_right_eye[i].x, final_right_eye[i].y, final_right_eye[i+1].x, final_right_eye[i+1].y);
     }
     u8g2.sendBuffer();
 }

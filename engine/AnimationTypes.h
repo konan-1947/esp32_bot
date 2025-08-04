@@ -1,5 +1,6 @@
 #pragma once
 #include "../generated/vector_shapes.h" // Dùng ../ để đi ngược ra thư mục gốc
+#include "../directors/EmotionManager.h" // Include để sử dụng Emotion struct
 
 enum EmotionState {
     NEUTRAL,
@@ -22,8 +23,9 @@ struct AnimationState {
     unsigned long start_time = 0;
     float duration_sec = 0.0;
     
-    EmotionState start_state = NEUTRAL;
-    EmotionState end_state = NEUTRAL;
+    // Sử dụng con trỏ đến struct Emotion thay vì enum EmotionState
+    const Emotion* start_state = nullptr;
+    const Emotion* end_state = nullptr;
     
     float intensity = 1.0;
     EasingType easing = LINEAR;
