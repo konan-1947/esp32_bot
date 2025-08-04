@@ -17,9 +17,11 @@ const Emotion* current_emotion = &emotions[NEUTRAL_STATE_INDEX]; // "Trí nhớ"
 unsigned long emotion_state_start_time = 0;     // Thời điểm bắt đầu trạng thái hiện tại
 unsigned long current_emotion_dwell_time = 0;   // Thời gian cần ở lại trong trạng thái này
 
-// --- Biến cho "Bộ não Hướng nhìn" (Gaze Director) ---
-unsigned long last_gaze_change_time = 0;
-unsigned long next_gaze_interval = 0;
+// --- BIẾN TRẠNG THÁI CHO GAZE DIRECTOR (NÂNG CẤP) ---
+GazeState current_gaze_state = GAZE_IDLE;
+unsigned long gaze_state_start_time = 0;
+unsigned long next_gaze_action_interval = 0; // Thời gian chờ ở trạng thái IDLE
+float gaze_target_offset = 0.0f;
 
 
 // =========================================================================
@@ -36,8 +38,8 @@ void initialize_directors() {
     current_emotion_dwell_time = random(NEUTRAL_DWELL_MIN, NEUTRAL_DWELL_MAX);
 
     // Khởi tạo Gaze Director
-    last_gaze_change_time = millis();
-    next_gaze_interval = random(4000, 8000); // Thay đổi hướng nhìn sau 4-8 giây
+    gaze_state_start_time = millis();
+    next_gaze_action_interval = random(4000, 8000); // Lần liếc mắt đầu tiên
 }
 
 // --- BỘ NÃO CHỚP MẮT ---
@@ -104,22 +106,76 @@ void emotion_director_update() {
     }
 }
 
-// --- BỘ NÃO HƯỚNG NHÌN ---
-// Quyết định HƯỚNG NHÌN tiếp theo là gì.
+// --- BỘ NÃO HƯỚNG NHÌN (VIẾT LẠI HOÀN TOÀN) ---
 void gaze_director_update() {
-    // Chỉ thay đổi hướng nhìn khi engine rảnh và đã đến lúc
-    if (!animation_engine_is_busy() && (millis() - last_gaze_change_time > next_gaze_interval)) {
-        int choice = random(10); // 0-9
-        if (choice < 3) { // 30% cơ hội nhìn trái
-            animation_engine_look_left();
-        } else if (choice < 6) { // 30% cơ hội nhìn phải
-            animation_engine_look_right();
-        } else { // 40% cơ hội nhìn thẳng
-            animation_engine_look_center();
+    // "Bộ não" này không hành động nếu có animation cảm xúc hoặc chớp mắt đang chạy
+    if (animation_engine_is_busy()) {
+        return;
+    }
+
+    unsigned long current_time = millis();
+
+    switch (current_gaze_state) {
+        case GAZE_IDLE: {
+            // Trạng thái nghỉ, mắt nhìn thẳng. Chờ đến lúc hành động.
+            if (current_time - gaze_state_start_time > next_gaze_action_interval) {
+                // Đã đến lúc liếc mắt
+                int choice = random(10);
+                if (choice < 7) { // 70% cơ hội liếc mắt
+                    gaze_target_offset = (random(2) == 0) ? -10.0f : 10.0f; // Ngẫu nhiên trái hoặc phải
+                    float gaze_duration = 0.25f; // Liếc sang bên trong 0.25 giây
+
+                    animation_engine_start_gaze_transition(gaze_target_offset, gaze_duration);
+                    
+                    // Chuyển sang trạng thái tiếp theo
+                    current_gaze_state = GAZE_TRANSITION_TO_SIDE;
+                    gaze_state_start_time = current_time;
+                } else {
+                    // 30% còn lại là không làm gì, chỉ reset bộ đếm
+                    gaze_state_start_time = current_time;
+                    next_gaze_action_interval = random(4000, 8000);
+                }
+            }
+            break;
         }
 
-        // Đặt lại bộ đếm
-        last_gaze_change_time = millis();
-        next_gaze_interval = random(4000, 8000);
+        case GAZE_TRANSITION_TO_SIDE: {
+            // Đang trong quá trình liếc sang bên. Chờ cho engine hoàn thành.
+            // is_gaze_transitioning là biến trong AnimationEngine
+            if (!is_gaze_transitioning) { 
+                // Engine đã liếc xong, chuyển sang trạng thái dừng lại
+                current_gaze_state = GAZE_DWELLING_AT_SIDE;
+                gaze_state_start_time = current_time;
+            }
+            break;
+        }
+
+        case GAZE_DWELLING_AT_SIDE: {
+            // Đã liếc xong, đang dừng lại ở bên đó.
+            // Thời gian dừng lại ngẫu nhiên, không quá nửa giây (ví dụ: 100-400ms)
+            const unsigned long dwell_duration = random(100, 401); 
+            if (current_time - gaze_state_start_time > dwell_duration) {
+                // Đã dừng đủ lâu, ra lệnh quay về trung tâm
+                float return_duration = 0.3f; // Quay về trong 0.3 giây
+                animation_engine_start_gaze_transition(0.0f, return_duration); // 0.0f là vị trí trung tâm
+
+                // Chuyển sang trạng thái tiếp theo
+                current_gaze_state = GAZE_TRANSITION_TO_CENTER;
+                gaze_state_start_time = current_time;
+            }
+            break;
+        }
+
+        case GAZE_TRANSITION_TO_CENTER: {
+            // Đang trong quá trình liếc về trung tâm. Chờ cho engine hoàn thành.
+            if (!is_gaze_transitioning) {
+                // Đã về đến trung tâm, quay lại trạng thái nghỉ
+                current_gaze_state = GAZE_IDLE;
+                gaze_state_start_time = current_time;
+                // Lên lịch cho lần liếc mắt tiếp theo
+                next_gaze_action_interval = random(4000, 8000);
+            }
+            break;
+        }
     }
 }

@@ -18,6 +18,13 @@ Point current_right_eye[EYE_VERTEX_COUNT];
 float gaze_offset_x = 0.0;
 float gaze_offset_y = 0.0;
 
+// MỚI: Các biến để quản lý animation của Gaze
+bool is_gaze_transitioning = false;
+unsigned long gaze_start_time = 0;
+float gaze_duration_sec = 0.0;
+float gaze_start_offset_x = 0.0;
+float gaze_target_offset_x = 0.0;
+
 // --- CÁC HÀM TIỆN ÍCH ---
 
 // Nội suy tuyến tính
@@ -110,28 +117,38 @@ void animation_engine_start_blink() {
     blink_anim.intensity = 1.0;
 }
 
-// MỚI: Các hàm điều khiển hướng nhìn
-void animation_engine_look_left() {
-    gaze_offset_x = -10.0; // Dịch tâm nhìn sang trái 10 pixel
-    gaze_offset_y = 0.0;
-}
+// NÂNG CẤP: Hàm Gaze mới, mạnh mẽ hơn
+void animation_engine_start_gaze_transition(float target_offset_x, float duration) {
+    if (is_gaze_transitioning) return; // Bỏ qua nếu đang liếc dở
 
-void animation_engine_look_right() {
-    gaze_offset_x = 10.0; // Dịch tâm nhìn sang phải 10 pixel
-    gaze_offset_y = 0.0;
-}
-
-void animation_engine_look_center() {
-    gaze_offset_x = 0.0;
-    gaze_offset_y = 0.0;
+    is_gaze_transitioning = true;
+    gaze_start_time = millis();
+    gaze_duration_sec = duration;
+    gaze_start_offset_x = gaze_offset_x; // Bắt đầu từ vị trí hiện tại
+    gaze_target_offset_x = target_offset_x;
 }
 
 
 void animation_engine_update() {
     // =========================================================================
-    // GIAI ĐOẠN 1: TÍNH TOÁN HÌNH DẠNG MẮT CƠ BẢN (SHAPE CALCULATION)
+    // GIAI ĐOẠN 1: CẬP NHẬT CÁC TRẠNG THÁI LOGIC (KHÔNG VẼ)
     // =========================================================================
 
+    // --- CẬP NHẬT LOGIC HƯỚNG NHÌN (GAZE) ---
+    if (is_gaze_transitioning) {
+        unsigned long elapsed = millis() - gaze_start_time;
+        float progress = (float)elapsed / (gaze_duration_sec * 1000.0f);
+
+        if (progress >= 1.0f) {
+            progress = 1.0f;
+            is_gaze_transitioning = false; // Kết thúc animation liếc mắt
+        }
+        
+        // Cập nhật giá trị gaze_offset_x một cách mượt mà
+        gaze_offset_x = linear_interpolate(gaze_start_offset_x, gaze_target_offset_x, apply_easing(progress, EASE_IN_OUT_QUAD));
+    }
+
+    // --- CẬP NHẬT LOGIC HÌNH DẠNG MẮT (SHAPE) ---
     // Ưu tiên xử lý chớp mắt trước
     if (blink_anim.is_playing) {
         unsigned long elapsed = millis() - blink_anim.start_time;
@@ -186,6 +203,9 @@ void animation_engine_update() {
     // =========================================================================
     // GIAI ĐOẠN 2: ÁP DỤNG BIẾN ĐỔI (TRANSFORM) VÀ VẼ
     // =========================================================================
+    
+    // (Toàn bộ logic tính toán final_left_eye, final_right_eye và vẽ bằng drawTriangle không đổi)
+    // Nó sẽ tự động sử dụng giá trị gaze_offset_x đã được cập nhật mượt mà ở trên.
     
     // Mảng RAM tạm thời để chứa tọa độ cuối cùng sau khi biến đổi
     Point final_left_eye[EYE_VERTEX_COUNT];
