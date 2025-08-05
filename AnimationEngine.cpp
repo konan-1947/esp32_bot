@@ -73,7 +73,7 @@ bool animation_engine_is_busy() {
     return emotion_anim.is_playing || blink_anim.is_playing;
 }
 
-void animation_engine_change_emotion(const Emotion* start, const Emotion* target, float duration, float intensity, EasingType easing) {
+void animation_engine_change_emotion(const Emotion* start, const Emotion* target, float duration, float intensity, EasingType easing, unsigned long dwell_time) {
     if (emotion_anim.is_playing) return; // Chỉ nhận lệnh mới khi rảnh
 
     emotion_anim.is_playing = true;
@@ -84,6 +84,9 @@ void animation_engine_change_emotion(const Emotion* start, const Emotion* target
     emotion_anim.end_state = target;
     emotion_anim.intensity = intensity;
     emotion_anim.easing = easing;
+    
+    // Lưu thời gian dwell để Emotion Director có thể sử dụng
+    emotion_anim.dwell_time = dwell_time;
 }
 
 void animation_engine_start_blink() {

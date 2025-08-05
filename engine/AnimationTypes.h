@@ -31,4 +31,7 @@ struct AnimationState {
     EasingType easing = LINEAR;
     
     float paused_progress = 0.0;
+    
+    // Thời gian tồn tại của cảm xúc (dwell time)
+    unsigned long dwell_time = 0;
 };

@@ -5,7 +5,7 @@
 // Function declarations
 void animation_engine_initialize();
 bool animation_engine_is_busy();
-void animation_engine_change_emotion(const Emotion* start, const Emotion* target, float duration, float intensity, EasingType easing);
+void animation_engine_change_emotion(const Emotion* start, const Emotion* target, float duration, float intensity, EasingType easing, unsigned long dwell_time);
 void animation_engine_start_blink();
 void animation_engine_update();
 

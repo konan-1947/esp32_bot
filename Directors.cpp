@@ -89,21 +89,24 @@ void emotion_director_update() {
         // Tạo các tham số ngẫu nhiên cho animation
         float duration = random(30, 71) / 100.0f; // Thời gian chuyển đổi từ 0.3 đến 0.7 giây
         
+        // Tính thời gian tồn tại cho cảm xúc mới
+        unsigned long dwell_time;
+        if (strcmp(next_emotion->name, "neutral") == 0) {
+            dwell_time = random(NEUTRAL_DWELL_MIN, NEUTRAL_DWELL_MAX);
+        } else {
+            dwell_time = random(EMOTION_DWELL_MIN, EMOTION_DWELL_MAX);
+        }
+        
         // Ra lệnh
-        animation_engine_change_emotion(start_emotion, next_emotion, duration, 1.0f, EASE_IN_OUT_QUAD);
+        animation_engine_change_emotion(start_emotion, next_emotion, duration, 1.0f, EASE_IN_OUT_QUAD, dwell_time);
         
         // Cập nhật "trí nhớ" của bộ não
         current_emotion = next_emotion;
+        current_emotion_dwell_time = dwell_time;
     }
     
-    // Dù có thay đổi hay không, vẫn phải reset bộ đếm cho trạng thái (hiện tại hoặc mới)
+    // Reset bộ đếm thời gian cho trạng thái hiện tại
     emotion_state_start_time = millis();
-    // Quyết định thời gian tồn tại cho trạng thái tiếp theo
-    if (strcmp(current_emotion->name, "neutral") == 0) {
-        current_emotion_dwell_time = random(NEUTRAL_DWELL_MIN, NEUTRAL_DWELL_MAX);
-    } else {
-        current_emotion_dwell_time = random(EMOTION_DWELL_MIN, EMOTION_DWELL_MAX);
-    }
 }
 
 // --- BỘ NÃO HƯỚNG NHÌN (VIẾT LẠI HOÀN TOÀN) ---
