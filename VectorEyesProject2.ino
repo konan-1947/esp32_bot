@@ -13,6 +13,7 @@
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
+#include <ESPmDNS.h>
 #include "secrets.h"
 
 // Khởi tạo đối tượng màn hình OLED
@@ -20,6 +21,11 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 // Khởi tạo đối tượng WiFiMulti
 WiFiMulti wifiMulti;
+
+// Biến global để lưu thông tin server tìm được qua mDNS
+String discovered_server_ip = "";
+int discovered_server_port = 0;
+bool server_discovered = false;
 
 // =================================================================
 // HÀM HELPER ĐỂ TÌM EMOTION THEO TÊN
@@ -58,15 +64,71 @@ void networkAndBrainTask(void *pvParameters) {
   Serial.println(WiFi.localIP());
 
   // =================================================================
-  // --- THÊM MỚI: GỬI REQUEST KIỂM TRA ĐẾN SERVER ---
+  // --- KHỞI TẠO mDNS VÀ TÌM SERVER ---
+  // =================================================================
+  Serial.println("\n[Core 0] Đang khởi tạo mDNS...");
+  if (!MDNS.begin("esp32-vector-eyes")) {
+    Serial.println("[Core 0] Lỗi khởi tạo mDNS!");
+  } else {
+    Serial.println("[Core 0] mDNS đã khởi tạo thành công!");
+    
+    // Tìm server bằng mDNS
+    Serial.printf("[Core 0] Đang tìm '%s.local' trên mạng...\n", MDNS_HOSTNAME);
+    
+    // Thử tìm server trong 10 giây
+    int attempts = 0;
+    while (!server_discovered && attempts < 20) {
+      int n = MDNS.queryService("http", "tcp");
+      if (n > 0) {
+        Serial.printf("[Core 0] Tìm thấy %d dịch vụ HTTP\n", n);
+        
+        for (int i = 0; i < n; ++i) {
+          String hostname = MDNS.hostname(i);
+          int port = MDNS.port(i);
+          
+          Serial.printf("[Core 0] Dịch vụ %d: %s (Port: %d)\n", i + 1, hostname.c_str(), port);
+          
+          // Kiểm tra xem có phải server của chúng ta không
+          if (hostname.indexOf(MDNS_HOSTNAME) != -1) {
+            // Lấy IP bằng cách resolve hostname
+            IPAddress ip = MDNS.queryHost(hostname, 1000);
+            if (ip.toString() != "0.0.0.0") {
+              discovered_server_ip = ip.toString();
+              discovered_server_port = port;
+              server_discovered = true;
+              
+              Serial.println("[Core 0] 🎯 ĐÃ TÌM THẤY SERVER ROBOT!");
+              Serial.printf("[Core 0] IP: %s, Port: %d\n", discovered_server_ip.c_str(), discovered_server_port);
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!server_discovered) {
+        Serial.printf("[Core 0] Lần thử %d/20: Không tìm thấy server, thử lại sau 500ms...\n", attempts + 1);
+        vTaskDelay(pdMS_TO_TICKS(500));
+        attempts++;
+      }
+    }
+    
+    if (!server_discovered) {
+      Serial.println("[Core 0] ⚠️ Không tìm thấy server qua mDNS, sử dụng IP cố định");
+      discovered_server_ip = String(SERVER_IP);
+      discovered_server_port = SERVER_PORT;
+    }
+  }
+
+  // =================================================================
+  // --- GỬI REQUEST KIỂM TRA ĐẾN SERVER ---
   // =================================================================
   Serial.println("\n[Core 0] Đang thử gửi request kiểm tra đến server...");
   
   HTTPClient http;
-  String serverUrl = "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + "/"; // Gửi đến trang chủ
+  String serverUrl = "http://" + discovered_server_ip + ":" + String(discovered_server_port) + "/";
   
   http.begin(serverUrl);
-  int httpCode = http.GET(); // Gửi một request GET đơn giản
+  int httpCode = http.GET();
 
   if (httpCode > 0) {
     String payload = http.getString();
@@ -99,7 +161,7 @@ void networkAndBrainTask(void *pvParameters) {
         // =================================================================
         if (currentTime - lastHeartbeat > 5000) {
             HTTPClient http;
-            String heartbeatUrl = "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + "/api/heartbeat";
+            String heartbeatUrl = "http://" + discovered_server_ip + ":" + String(discovered_server_port) + "/api/heartbeat";
             
             http.begin(heartbeatUrl);
             http.addHeader("Content-Type", "application/json");
@@ -123,7 +185,7 @@ void networkAndBrainTask(void *pvParameters) {
         // =================================================================
         if (currentTime - lastEmotionCheck > 2000) {
             HTTPClient http;
-            String emotionUrl = "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + "/api/emotion/next";
+            String emotionUrl = "http://" + discovered_server_ip + ":" + String(discovered_server_port) + "/api/emotion/next";
             
             http.begin(emotionUrl);
             int httpCode = http.GET();

@@ -1,9 +1,12 @@
 #ifndef SECRETS_H
 #define SECRETS_H
 
-// --- Thông tin Server ---
-const char* SERVER_IP = "192.168.1.28"; // Thay bằng IP thực tế của máy tính bạn
+// --- Thông tin Server (Fallback khi mDNS không hoạt động) ---
+const char* SERVER_IP = "192.168.1.28"; // IP fallback của máy tính chạy server
 const int SERVER_PORT = 5000;
+
+// --- Cấu hình mDNS ---
+const char* MDNS_HOSTNAME = "robot-server"; // Tên host để tìm kiếm qua mDNS
 
 // --- Danh sách các mạng WiFi đã biết ---
 const char* known_wifis[][2] = {

@@ -6,11 +6,13 @@ Chạy trên máy tính để nhận kết nối từ ESP32
 """
 
 from flask import Flask, request, jsonify, render_template_string
+from zeroconf import ServiceInfo, Zeroconf
 import json
 import logging
 from datetime import datetime
 import threading
 import time
+import socket
 
 # Cấu hình logging
 logging.basicConfig(
@@ -339,7 +341,6 @@ def not_found(error):
 
 def get_local_ip():
     """Lấy địa chỉ IP local của máy tính"""
-    import socket
     try:
         # Kết nối tạm thời để lấy IP local
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -349,6 +350,35 @@ def get_local_ip():
         return local_ip
     except Exception:
         return "127.0.0.1"
+
+def register_mdns_service():
+    """Hàm chạy trong một luồng riêng để quảng bá dịch vụ mDNS."""
+    ip_address = get_local_ip()
+    port = 5000
+    
+    info = ServiceInfo(
+        "_http._tcp.local.",  # Loại dịch vụ (web server)
+        "Robot Brain Server._http._tcp.local.", # Tên dịch vụ
+        addresses=[socket.inet_aton(ip_address)],
+        port=port,
+        properties={'path': '/'},
+        server="robot-server.local." # Tên host quan trọng nhất
+    )
+
+    zeroconf = Zeroconf()
+    add_log("INFO", f"Đang quảng bá dịch vụ mDNS 'robot-server.local' tại {ip_address}:{port}")
+    print(f"🔍 mDNS: Đang quảng bá 'robot-server.local' tại {ip_address}:{port}")
+    zeroconf.register_service(info)
+    
+    try:
+        # Giữ cho luồng chạy để tiếp tục quảng bá
+        while server_state['is_running']:
+            time.sleep(0.1)
+    finally:
+        add_log("INFO", "Ngừng quảng bá dịch vụ mDNS")
+        print("🔍 mDNS: Ngừng quảng bá dịch vụ")
+        zeroconf.unregister_service(info)
+        zeroconf.close()
 
 if __name__ == '__main__':
     local_ip = get_local_ip()
@@ -361,17 +391,25 @@ if __name__ == '__main__':
     print(f"{'='*60}")
     print(f"🌐 Địa chỉ: http://{local_ip}:5000")
     print(f"📱 ESP32 kết nối đến: {local_ip}:5000")
+    print(f"🔍 mDNS: robot-server.local")
     print(f"⏰ Khởi động lúc: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}")
     print(f"💡 Mở trình duyệt và truy cập: http://{local_ip}:5000")
     print(f"🛑 Nhấn Ctrl+C để tắt server")
     print(f"{'='*60}\n")
     
+    # Chạy mDNS trong một luồng riêng để không chặn Flask
+    mdns_thread = threading.Thread(target=register_mdns_service)
+    mdns_thread.daemon = True
+    mdns_thread.start()
+    
     try:
         app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
     except KeyboardInterrupt:
+        server_state['is_running'] = False
         add_log("INFO", "Server tắt bởi người dùng (Ctrl+C)")
         print("\n👋 Server đã tắt!")
     except Exception as e:
+        server_state['is_running'] = False
         add_log("ERROR", f"Lỗi server: {str(e)}")
         print(f"\n❌ Lỗi: {e}") 
